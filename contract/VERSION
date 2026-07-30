@@ -1,0 +1,5 @@
+contract=pole-target-envelope
+version=1.0.0
+tag=thin-sdk-contract-v1.0.0
+commit=f45b0396b4680fe588a93086ceb2934d3e157d04
+source=https://github.com/lattice-hub/specification/tree/thin-sdk-contract-v1.0.0/thin-sdk/target-envelope/v1

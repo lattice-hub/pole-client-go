@@ -1,0 +1,33 @@
+name: 持续集成
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Go ${{ matrix.go }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.22.x", "1.23.x"]
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 配置 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - name: 检查格式
+        run: test -z "$(gofmt -l .)"
+      - name: 验证契约校验和
+        run: cd contract && sha256sum --check SHA256SUMS
+      - name: 测试
+        run: go test -race -count=1 ./...
+      - name: 静态检查
+        run: go vet ./...

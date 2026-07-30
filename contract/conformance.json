@@ -1,0 +1,406 @@
+{
+  "contract": "pole-target-envelope",
+  "contract_version": "1.0.0",
+  "envelope_version": "1",
+  "valid": [
+    {
+      "name": "minimal_unicode_trim",
+      "input": {
+        "namespace": " default　",
+        "service": " orders "
+      },
+      "normalized": {
+        "namespace": "default",
+        "service": "orders"
+      },
+      "expected_headers": [
+        ["x-pole-target-envelope-version", "1"],
+        ["x-pole-target-namespace", "default"],
+        ["x-pole-target-service", "orders"]
+      ]
+    },
+    {
+      "name": "complete",
+      "input": {
+        "namespace": "production",
+        "service": "catalog",
+        "protocol": "grpc",
+        "group": "blue",
+        "service_version": "v1",
+        "method": "GetProduct",
+        "original_endpoint": "catalog.internal:8080"
+      },
+      "normalized": {
+        "namespace": "production",
+        "service": "catalog",
+        "protocol": "grpc",
+        "group": "blue",
+        "service_version": "v1",
+        "method": "GetProduct",
+        "original_endpoint": "catalog.internal:8080"
+      },
+      "expected_headers": [
+        ["x-pole-target-envelope-version", "1"],
+        ["x-pole-target-namespace", "production"],
+        ["x-pole-target-service", "catalog"],
+        ["x-pole-target-protocol", "grpc"],
+        ["x-pole-target-group", "blue"],
+        ["x-pole-target-service-version", "v1"],
+        ["x-pole-target-method", "GetProduct"],
+        ["x-pole-original-endpoint", "catalog.internal:8080"]
+      ]
+    },
+    {
+      "name": "unicode_header_encoding",
+      "input": {
+        "namespace": "生产",
+        "service": "订单%,服务"
+      },
+      "normalized": {
+        "namespace": "生产",
+        "service": "订单%,服务"
+      },
+      "expected_headers": [
+        ["x-pole-target-envelope-version", "1"],
+        ["x-pole-target-namespace", "%E7%94%9F%E4%BA%A7"],
+        ["x-pole-target-service", "%E8%AE%A2%E5%8D%95%25%2C%E6%9C%8D%E5%8A%A1"]
+      ]
+    },
+    {
+      "name": "feff_is_not_whitespace",
+      "input": {
+        "namespace": "﻿default﻿",
+        "service": "orders"
+      },
+      "normalized": {
+        "namespace": "﻿default﻿",
+        "service": "orders"
+      },
+      "expected_headers": [
+        ["x-pole-target-envelope-version", "1"],
+        ["x-pole-target-namespace", "%EF%BB%BFdefault%EF%BB%BF"],
+        ["x-pole-target-service", "orders"]
+      ]
+    },
+    {
+      "name": "ipv4_endpoint",
+      "input": {
+        "namespace": "default",
+        "service": "orders",
+        "original_endpoint": "127.0.0.1:8080"
+      },
+      "normalized": {
+        "namespace": "default",
+        "service": "orders",
+        "original_endpoint": "127.0.0.1:8080"
+      },
+      "expected_headers": [
+        ["x-pole-target-envelope-version", "1"],
+        ["x-pole-target-namespace", "default"],
+        ["x-pole-target-service", "orders"],
+        ["x-pole-original-endpoint", "127.0.0.1:8080"]
+      ]
+    },
+    {
+      "name": "ipv6_endpoint",
+      "input": {
+        "namespace": "default",
+        "service": "orders",
+        "original_endpoint": "[::1]:8080"
+      },
+      "normalized": {
+        "namespace": "default",
+        "service": "orders",
+        "original_endpoint": "[::1]:8080"
+      },
+      "expected_headers": [
+        ["x-pole-target-envelope-version", "1"],
+        ["x-pole-target-namespace", "default"],
+        ["x-pole-target-service", "orders"],
+        ["x-pole-original-endpoint", "[::1]:8080"]
+      ]
+    },
+    {
+      "name": "ipv4_embedded_ipv6_endpoint",
+      "input": {
+        "namespace": "default",
+        "service": "orders",
+        "original_endpoint": "[::ffff:192.0.2.1]:8080"
+      },
+      "normalized": {
+        "namespace": "default",
+        "service": "orders",
+        "original_endpoint": "[::ffff:192.0.2.1]:8080"
+      },
+      "expected_headers": [
+        ["x-pole-target-envelope-version", "1"],
+        ["x-pole-target-namespace", "default"],
+        ["x-pole-target-service", "orders"],
+        ["x-pole-original-endpoint", "[::ffff:192.0.2.1]:8080"]
+      ]
+    },
+    {
+      "name": "empty_optional_fields_are_omitted",
+      "input": {
+        "namespace": "default",
+        "service": "orders",
+        "protocol": " ",
+        "group": "",
+        "service_version": "　",
+        "method": "",
+        "original_endpoint": ""
+      },
+      "normalized": {
+        "namespace": "default",
+        "service": "orders"
+      },
+      "expected_headers": [
+        ["x-pole-target-envelope-version", "1"],
+        ["x-pole-target-namespace", "default"],
+        ["x-pole-target-service", "orders"]
+      ]
+    },
+    {
+      "name": "caller_internal_headers_are_replaced",
+      "input": {
+        "namespace": "default",
+        "service": "orders"
+      },
+      "base_headers": [
+        ["Authorization", "Bearer token"],
+        ["X-Pole-Target-Envelope-Version", "999"],
+        ["X-Pole-Target-Namespace", "forged"],
+        ["x-pole-target-service", "forged"]
+      ],
+      "normalized": {
+        "namespace": "default",
+        "service": "orders"
+      },
+      "expected_headers": [
+        ["Authorization", "Bearer token"],
+        ["x-pole-target-envelope-version", "1"],
+        ["x-pole-target-namespace", "default"],
+        ["x-pole-target-service", "orders"]
+      ]
+    }
+  ],
+  "invalid": [
+    {
+      "name": "empty_namespace",
+      "input": {"namespace": "", "service": "orders"},
+      "diagnostic": "REQUIRED_FIELD_EMPTY"
+    },
+    {
+      "name": "blank_service",
+      "input": {"namespace": "default", "service": "　"},
+      "diagnostic": "REQUIRED_FIELD_EMPTY"
+    },
+    {
+      "name": "line_feed_control",
+      "input": {"namespace": "def\nault", "service": "orders"},
+      "diagnostic": "CONTROL_CHARACTER"
+    },
+    {
+      "name": "next_line_control",
+      "input": {"namespace": "default", "service": "orders"},
+      "diagnostic": "CONTROL_CHARACTER"
+    },
+    {
+      "name": "endpoint_missing_port",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "orders.internal"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_empty_host",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": ":8080"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_zero_port",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "orders.internal:0"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_leading_zero_port",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "orders.internal:080"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_port_overflow",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "orders.internal:65536"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_non_decimal_port",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "orders.internal:http"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_non_ascii_port",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "orders.internal:８０"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_unbracketed_ipv6",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "::1:8080"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_invalid_ipv6",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "[:::1]:8080"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_bracketed_ipv4",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "[127.0.0.1]:8080"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_ipv6_zone",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "[fe80::1%eth0]:8080"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_whitespace_host",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "bad host:80"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_path_host",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "evil/path:80"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_userinfo_host",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "evil@host:80"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_query_host",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "evil?x:80"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    },
+    {
+      "name": "endpoint_percent_host",
+      "input": {"namespace": "default", "service": "orders", "original_endpoint": "evil%host:80"},
+      "diagnostic": "INVALID_ORIGINAL_ENDPOINT"
+    }
+  ],
+  "language_specific_invalid": [
+    {
+      "name": "isolated_high_surrogate",
+      "field": "service",
+      "utf16_code_units": ["D800"],
+      "diagnostic": "INVALID_UNICODE_SCALAR"
+    },
+    {
+      "name": "isolated_low_surrogate",
+      "field": "service",
+      "utf16_code_units": ["DC00"],
+      "diagnostic": "INVALID_UNICODE_SCALAR"
+    }
+  ],
+  "sidecar_receive": {
+    "valid": [
+      {
+        "name": "minimal",
+        "headers": [
+          ["x-pole-target-envelope-version", "1"],
+          ["x-pole-target-namespace", "default"],
+          ["x-pole-target-service", "orders"]
+        ],
+        "expected_envelope": {
+          "namespace": "default",
+          "service": "orders"
+        }
+      },
+      {
+        "name": "canonical_unicode",
+        "headers": [
+          ["x-pole-target-envelope-version", "1"],
+          ["x-pole-target-namespace", "%E7%94%9F%E4%BA%A7"],
+          ["x-pole-target-service", "%E8%AE%A2%E5%8D%95%25%2C%E6%9C%8D%E5%8A%A1"]
+        ],
+        "expected_envelope": {
+          "namespace": "生产",
+          "service": "订单%,服务"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "missing_version",
+        "headers": [
+          ["x-pole-target-namespace", "default"],
+          ["x-pole-target-service", "orders"]
+        ],
+        "diagnostic": "MISSING_REQUIRED_HEADER"
+      },
+      {
+        "name": "duplicate_service",
+        "headers": [
+          ["x-pole-target-envelope-version", "1"],
+          ["x-pole-target-namespace", "default"],
+          ["x-pole-target-service", "orders"],
+          ["X-Pole-Target-Service", "payments"]
+        ],
+        "diagnostic": "DUPLICATE_INTERNAL_HEADER"
+      },
+      {
+        "name": "merged_duplicate_value",
+        "headers": [
+          ["x-pole-target-envelope-version", "1"],
+          ["x-pole-target-namespace", "default"],
+          ["x-pole-target-service", "orders,payments"]
+        ],
+        "diagnostic": "NON_CANONICAL_HEADER_VALUE"
+      },
+      {
+        "name": "unknown_target_header",
+        "headers": [
+          ["x-pole-target-envelope-version", "1"],
+          ["x-pole-target-namespace", "default"],
+          ["x-pole-target-service", "orders"],
+          ["x-pole-target-future", "value"]
+        ],
+        "diagnostic": "UNKNOWN_INTERNAL_HEADER"
+      },
+      {
+        "name": "invalid_percent_escape",
+        "headers": [
+          ["x-pole-target-envelope-version", "1"],
+          ["x-pole-target-namespace", "default"],
+          ["x-pole-target-service", "%GG"]
+        ],
+        "diagnostic": "NON_CANONICAL_HEADER_VALUE"
+      },
+      {
+        "name": "lowercase_percent_escape",
+        "headers": [
+          ["x-pole-target-envelope-version", "1"],
+          ["x-pole-target-namespace", "default"],
+          ["x-pole-target-service", "%e7%94%9f"]
+        ],
+        "diagnostic": "NON_CANONICAL_HEADER_VALUE"
+      },
+      {
+        "name": "unnecessary_percent_escape",
+        "headers": [
+          ["x-pole-target-envelope-version", "1"],
+          ["x-pole-target-namespace", "default"],
+          ["x-pole-target-service", "or%64ers"]
+        ],
+        "diagnostic": "NON_CANONICAL_HEADER_VALUE"
+      },
+      {
+        "name": "invalid_utf8",
+        "headers": [
+          ["x-pole-target-envelope-version", "1"],
+          ["x-pole-target-namespace", "default"],
+          ["x-pole-target-service", "%FF"]
+        ],
+        "diagnostic": "NON_CANONICAL_HEADER_VALUE"
+      }
+    ]
+  }
+}
