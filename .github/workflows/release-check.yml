@@ -21,7 +21,7 @@ jobs:
       - run: go test -race -count=1 ./...
       - run: go vet ./...
       - run: git archive --format=tar.gz --output=pole-client-go-candidate.tar.gz HEAD
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pole-client-go-candidate
           path: pole-client-go-candidate.tar.gz
