@@ -1,5 +1,23 @@
 # Go Thin SDK
 
+## 2026-08-02 Sidecar bootstrap 改造计划
+
+- [x] 核对现有 SDK、权威契约与生成工具
+- [x] vendor bootstrap protobuf 并生成 Go 绑定
+- [x] 实现 UDS OpenSession、失效与重连
+- [x] 迁移 TargetService 与业务元信息 API
+- [x] 更新 README、依赖、CI 与测试
+- [x] 运行 gofmt、test、race、vet
+
+## 2026-08-02 Review
+
+- `TargetEnvelope` 和旧 `x-pole-*` 字段均已删除；`TargetService` 仅保留 namespace/service。
+- 业务协议地址仅由 `OpenSession` 首帧提供，SDK 使用 `atomic.Pointer` 原子安装/失效快照。
+- UDS 断流立即清空快照；重连采用 50ms 到 1s 的指数退避，首次初始化默认在 10s 内失败。
+- proto 来自 specification `v0.1.0-ALPHA.39`，不可变 tag、commit 与 checksum
+  已写入 `contract/`。
+- `gofmt`、contract checksum、普通测试、race 测试、`go vet` 和 diff 空白检查通过。
+
 ## 计划
 
 - [x] 重新读取 Thin SDK 契约与一致性向量

@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package pole.sidecar.v1;
+
+option go_package = "github.com/pole-io/specification/source/go/api/v1/sidecar";
+option java_package = "io.pole.specification.api.v1.sidecar";
+option java_outer_classname = "SidecarBootstrapProto";
+
+service SidecarSessionService {
+  rpc OpenSession(ClientHello) returns (stream SidecarEvent);
+}
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_HTTP = 1;
+  PROTOCOL_GRPC = 2;
+  PROTOCOL_DUBBO = 3;
+  PROTOCOL_THRIFT = 4;
+}
+
+message ClientHello {
+  string sdk_language = 1;
+  string sdk_version = 2;
+  repeated Protocol supported_protocols = 3;
+}
+
+message Listener {
+  Protocol protocol = 1;
+  uint32 port = 2;
+}
+
+message ListenerSnapshot {
+  repeated Listener listeners = 1;
+}
+
+message SidecarEvent {
+  oneof event {
+    ListenerSnapshot listener_snapshot = 1;
+  }
+}

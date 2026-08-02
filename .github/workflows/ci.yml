@@ -25,6 +25,8 @@ jobs:
           cache: true
       - name: 检查格式
         run: test -z "$(gofmt -l .)"
+      - name: 检查模块依赖
+        run: go mod tidy && git diff --exit-code -- go.mod go.sum
       - name: 验证契约校验和
         run: cd contract && sha256sum --check SHA256SUMS
       - name: 测试

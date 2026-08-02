@@ -1,93 +1,111 @@
 # Pole Go Thin SDK
 
-`pole-client-go` 是 Pole Thin SDK 的 Go 核心包，提供与框架无关的
-`TargetEnvelope v1` 构造、校验与 HTTP Header 编码。
+`pole-client-go` 是与框架无关的 Pole Thin SDK 核心包。它负责：
 
-当前版本不包含 `http.RoundTripper`、gRPC、Dubbo 或其他框架 adapter。
+- 通过官方 gRPC 协议与本 Pod 的 Sidecar 建立内部 bootstrap 会话；
+- 从 Sidecar 首帧接收各业务协议的 loopback listener 地址；
+- 构造并注入经过校验、canonical percent 编码的 `TargetService` 元信息。
 
-## 状态
-
-当前工程实现 specification tag
-[`thin-sdk-contract-v1.0.0`](https://github.com/lattice-hub/specification/tree/thin-sdk-contract-v1.0.0/thin-sdk/target-envelope/v1)，
-vendored 资产与来源 commit 记录在 [`contract/`](contract/)。
-Pole Sidecar 尚未实现对应的本地专用 listener，因此当前版本只提供契约核心，
-不能宣称已经完成 Thin SDK 到 Sidecar 的端到端接入。
+业务请求不经过 bootstrap gRPC 会话；它们仍使用原有 HTTP、gRPC、Dubbo 或
+Thrift 协议访问 Sidecar listener，由 Sidecar 执行治理、服务发现和真实实例代理。
 
 ## 要求
 
 - Go 1.22 或更高版本
-- 仅使用 Go 标准库
+- Sidecar 与业务进程共享 Unix Domain Socket：默认
+  `/var/run/pole/sidecar/bootstrap.sock`
 
-## 安装
+安装：
 
 ```bash
 go get github.com/lattice-hub/pole-client-go
 ```
 
-## 使用
+## Bootstrap 与 listener
+
+`NewSidecarClient` 在其传入的 context 期限内等待有效首帧；默认上限为 10 秒。
+Sidecar 未就绪时 SDK 以有界指数退避重试，超时后初始化失败，绝不绕过 Sidecar
+直连真实服务。
 
 ```go
-package main
+client, err := pole.NewSidecarClient(ctx, pole.BootstrapConfig{
+	SDKVersion: "1.0.0",
+})
+if err != nil {
+	return err
+}
+defer client.Close()
 
-import (
-	"net/http"
+httpAddress, err := client.ListenerAddress(pole.ProtocolHTTP)
+if err != nil {
+	return err
+}
+// httpAddress 是 Sidecar 首帧返回的 127.0.0.1:port，不是服务实例地址。
+```
 
-	pole "github.com/lattice-hub/pole-client-go"
-)
+`BootstrapConfig.SocketPath` 优先级最高；未设置时读取
+`POLE_SIDECAR_SOCKET`，最后才使用默认 UDS 路径。SDK 不内置任何业务 listener
+端口；Sidecar 会优先使用 HTTP `15001`、gRPC `15002`、Dubbo `15003`、Thrift
+`15004`，冲突时可选择动态端口并通过首帧传递。
 
-func main() {
-	envelope, err := pole.NewTargetEnvelope(
-		"default",
-		"orders",
-		pole.TargetEnvelopeOptions{
-			Protocol:         "grpc",
-			ServiceVersion:   "v1",
-			Method:           "GetOrder",
-			OriginalEndpoint: "orders.internal:8080",
-		},
-	)
-	if err != nil {
-		panic(err)
-	}
+会话断流时 SDK 立即删除 listener 快照，`ListenerAddress` 返回
+`ErrSidecarUnavailable`；后台重连成功并收到新的有效首帧后，地址原子恢复。框架
+adapter 不应缓存该地址，也应在失效时自行废弃其持有的旧连接池。
 
-	headers, err := envelope.EncodeHTTPHeaders(http.Header{
-		"X-Request-ID": {"request-123"},
-	})
-	if err != nil {
-		panic(err)
-	}
-	_ = headers
+## TargetService
+
+`TargetService v1` 只有 `namespace` 和 `service`。SDK 去除首尾契约空白、拒绝
+Unicode `Cc` 控制字符和非法 UTF-8，然后以 canonical UTF-8 `%HH` 编码值。
+
+```go
+target, err := pole.NewTargetService("default", "orders")
+if err != nil {
+	return err
+}
+
+request, err := http.NewRequest(http.MethodGet, "http://"+httpAddress+"/orders/42", nil)
+if err != nil {
+	return err
+}
+request.Header, err = target.EncodeHTTPHeaders(request.Header)
+if err != nil {
+	return err
 }
 ```
 
-`EncodeHTTPHeaders` 返回输入 Header 的副本，保留非 Pole Header，并覆盖或删除
-调用方提供的全部 TargetEnvelope 内部 Header。`Headers` 按契约固定顺序返回，
-可用于需要确定性编码的传输实现。两个方法都会在编码前重新校验信封，并在
-`TargetEnvelope` 是零值、nil 或状态无效时返回 error，绝不会生成缺失必填字段的
-Header。
+两个规范键始终由 SDK 覆盖调用方同名值：
 
-默认 Sidecar endpoint 为：
-
-```go
-pole.DefaultSidecarEndpoint // http://127.0.0.1:15001
+```text
+latticehub-target-namespace
+latticehub-target-service
 ```
 
-## TargetEnvelope 语义
+- HTTP 和 Thrift-over-HTTP：`EncodeHTTPHeaders`；Thrift 使用 Apache Thrift 官方
+  HTTP Transport，不增加私有帧。
+- gRPC：`EncodeGRPCMetadata`，将结果放入 outgoing metadata。
+- Dubbo：`EncodeAttachments`，将结果写入请求 attachment。
 
-- 构造时拒绝非法 Unicode scalar，并按契约精确集合去除首尾空白。
-- `namespace` 和 `service` 必填且不能为空。
-- 任意字段都不允许包含 Unicode General Category `Cc` 控制字符。
-- `original_endpoint` 只接受 `host:port` 或 `[ipv6]:port`。
-- endpoint host 不允许 Unicode 空白或 `/\[]@?#%`。
-- 端口必须是无前导零的十进制 `1..65535`。
-- Header value 使用 canonical UTF-8 `%HH` 编码。
-- 构造后的字段不可修改，只能通过只读访问器读取。
+Sidecar 必须在转发前再次校验这两个字段并删除它们。v1 的信任边界是 Kubernetes
+Pod；不增加 session token 或逐请求签名。
+
+## 契约资产
+
+`contract/` vendor 了 `TargetService v1`、Sidecar session 文档以及官方
+`api/v1/sidecar/bootstrap.proto`。`internal/bootstrapv1/` 中的 Go 文件由
+`protoc-gen-go` 和 `protoc-gen-go-grpc` 生成，不应手改。资产校验和位于
+`contract/SHA256SUMS`。
+
+当前 source specification 工作树中的 bootstrap 与 TargetService 资产尚未进入
+已发布 tag；精确来源状态记录在 `contract/VERSION`。因此本 SDK 改造在本地验证
+完成前不应作为已发布的稳定兼容性承诺。
 
 ## 验证
 
 ```bash
-gofmt -w .
-go test ./...
+test -z "$(gofmt -l .)"
+cd contract && sha256sum --check SHA256SUMS
+go test -count=1 ./...
+go test -race -count=1 ./...
 go vet ./...
 ```
 

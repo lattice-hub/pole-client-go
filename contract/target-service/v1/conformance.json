@@ -1,0 +1,66 @@
+{
+  "contract": "latticehub-target-service",
+  "contract_version": "1.0.0",
+  "valid": [
+    {
+      "name": "ascii",
+      "input": {"namespace": " default ", "service": " orders "},
+      "normalized": {"namespace": "default", "service": "orders"},
+      "expected_metadata": [
+        ["latticehub-target-namespace", "default"],
+        ["latticehub-target-service", "orders"]
+      ]
+    },
+    {
+      "name": "unicode_and_reserved_bytes",
+      "input": {"namespace": "生产", "service": "订单%,服务"},
+      "normalized": {"namespace": "生产", "service": "订单%,服务"},
+      "expected_metadata": [
+        ["latticehub-target-namespace", "%E7%94%9F%E4%BA%A7"],
+        ["latticehub-target-service", "%E8%AE%A2%E5%8D%95%25%2C%E6%9C%8D%E5%8A%A1"]
+      ]
+    }
+  ],
+  "invalid": [
+    {"name": "empty_namespace", "input": {"namespace": "  ", "service": "orders"}, "diagnostic": "EMPTY_NAMESPACE"},
+    {"name": "empty_service", "input": {"namespace": "default", "service": "\u3000"}, "diagnostic": "EMPTY_SERVICE"},
+    {"name": "namespace_control", "input": {"namespace": "def\nault", "service": "orders"}, "diagnostic": "CONTROL_CHARACTER"},
+    {"name": "service_control", "input": {"namespace": "default", "service": "ord\u0085ers"}, "diagnostic": "CONTROL_CHARACTER"}
+  ],
+  "sidecar_receive": {
+    "valid": [
+      {
+        "name": "canonical",
+        "metadata": [
+          ["latticehub-target-namespace", "default"],
+          ["latticehub-target-service", "orders"]
+        ],
+        "expected": {"namespace": "default", "service": "orders"}
+      }
+    ],
+    "invalid": [
+      {
+        "name": "missing_service",
+        "metadata": [["latticehub-target-namespace", "default"]],
+        "diagnostic": "MISSING_SERVICE"
+      },
+      {
+        "name": "duplicate_namespace",
+        "metadata": [
+          ["latticehub-target-namespace", "default"],
+          ["latticehub-target-namespace", "other"],
+          ["latticehub-target-service", "orders"]
+        ],
+        "diagnostic": "DUPLICATE_NAMESPACE"
+      },
+      {
+        "name": "non_canonical",
+        "metadata": [
+          ["latticehub-target-namespace", "def%61ult"],
+          ["latticehub-target-service", "orders"]
+        ],
+        "diagnostic": "NON_CANONICAL_VALUE"
+      }
+    ]
+  }
+}

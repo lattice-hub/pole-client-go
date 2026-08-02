@@ -7,29 +7,22 @@ import (
 	pole "github.com/lattice-hub/pole-client-go"
 )
 
-func ExampleTargetEnvelope() {
-	envelope, err := pole.NewTargetEnvelope(" default ", " orders ", pole.TargetEnvelopeOptions{
-		Protocol:         "grpc",
-		ServiceVersion:   "v1",
-		Method:           "GetOrder",
-		OriginalEndpoint: "orders.internal:8080",
+func ExampleTargetService_EncodeHTTPHeaders() {
+	target, err := pole.NewTargetService(" default ", " orders ")
+	if err != nil {
+		panic(err)
+	}
+
+	headers, err := target.EncodeHTTPHeaders(http.Header{
+		pole.HeaderTargetNamespace: {"untrusted"},
 	})
 	if err != nil {
 		panic(err)
 	}
 
-	headers, err := envelope.EncodeHTTPHeaders(http.Header{
-		pole.HeaderNamespace: {"untrusted"},
-	})
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(envelope.Namespace(), envelope.Service())
-	fmt.Println(headers.Get(pole.HeaderEnvelopeVersion))
-	fmt.Println(headers.Get(pole.HeaderOriginalEndpoint))
-
+	fmt.Println(headers.Get(pole.HeaderTargetNamespace))
+	fmt.Println(headers.Get(pole.HeaderTargetService))
 	// Output:
-	// default orders
-	// 1
-	// orders.internal:8080
+	// default
+	// orders
 }
