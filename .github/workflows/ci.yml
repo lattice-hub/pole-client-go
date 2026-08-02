@@ -17,7 +17,7 @@ jobs:
         go: ["1.22.x", "1.23.x"]
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: 配置 Go
         uses: actions/setup-go@v5
         with:
