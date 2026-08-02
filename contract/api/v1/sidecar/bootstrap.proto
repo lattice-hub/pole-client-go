@@ -3,7 +3,7 @@ syntax = "proto3";
 package pole.sidecar.v1;
 
 option go_package = "github.com/pole-io/specification/source/go/api/v1/sidecar";
-option java_package = "io.pole.specification.api.v1.sidecar";
+option java_package = "io.github.latticehub.pole.specification.api.v1.sidecar";
 option java_outer_classname = "SidecarBootstrapProto";
 
 service SidecarSessionService {

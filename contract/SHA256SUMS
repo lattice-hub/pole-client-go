@@ -1,4 +1,4 @@
-c50e30c577e7cba255fb82750b81f48361732d8294e55f993eddb645ad94d79a  api/v1/sidecar/bootstrap.proto
+23dcabdaaa32c981d8bd1885950508021feedf6830202997c8e5c035fa5fd1b1  api/v1/sidecar/bootstrap.proto
 906bfb7cf079e53f970ef90b6c0f7c104b1f7d7f1f71be009b583cdd5a6e5e51  bootstrap/v1/README.md
 d3e5f34d3393498933a2445c827de34be9b0fd21f3ebe0d5d18bd64bd4aca5c1  target-service/v1/README.md
 eb3b56a0cf65b224df0889805190b3ee11036462b66bd21b2be1c42560604027  target-service/v1/schema.json
