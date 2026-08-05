@@ -2,8 +2,9 @@
 
 `pole-client-go` 是与框架无关的 Pole Thin SDK 核心包。它负责：
 
-- 通过官方 gRPC 协议与本 Pod 的 Sidecar 建立内部 bootstrap 会话；
+- 通过 `OpenControlSession` gRPC 协议与本 Pod 的 Sidecar 建立内部 bootstrap 会话；
 - 从 Sidecar 首帧接收各业务协议的 loopback listener 地址；
+- 注册本地 ingress 服务，并读取 Sidecar 回传的注册状态；
 - 构造并注入经过校验、canonical percent 编码的 `TargetService` 元信息。
 
 业务请求不经过 bootstrap gRPC 会话；它们仍使用原有 HTTP、gRPC、Dubbo 或
@@ -50,7 +51,21 @@ if err != nil {
 
 会话断流时 SDK 立即删除 listener 快照，`ListenerAddress` 返回
 `ErrSidecarUnavailable`；后台重连成功并收到新的有效首帧后，地址原子恢复。框架
-adapter 不应缓存该地址，也应在失效时自行废弃其持有的旧连接池。
+adapter 不应缓存该地址，也应在失效时自行废弃其持有的旧连接池。客户端首个控制事件
+固定为 `ClientHello`；尚未注销的本地服务注册会在重连后重放。
+
+```go
+registration, err := client.RegisterLocalService("prod", "payments", pole.ProtocolHTTP, 8080)
+if err != nil {
+	return err
+}
+status, found := client.LocalServiceStatus(registration.RegistrationID)
+_ = status
+_ = found
+if err := client.UnregisterLocalService(registration.RegistrationID); err != nil {
+	return err
+}
+```
 
 ## TargetService
 

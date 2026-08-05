@@ -7,7 +7,13 @@ option java_package = "io.github.latticehub.pole.specification.api.v1.sidecar";
 option java_outer_classname = "SidecarBootstrapProto";
 
 service SidecarSessionService {
+  // Legacy listener bootstrap retained for existing Thin SDKs.
   rpc OpenSession(ClientHello) returns (stream SidecarEvent);
+
+  // Long-lived Thin SDK control session. The first ClientEvent must contain
+  // ClientHello. Registrations belong to this stream and are removed when it
+  // closes.
+  rpc OpenControlSession(stream ClientEvent) returns (stream SidecarEvent);
 }
 
 enum Protocol {
@@ -24,17 +30,55 @@ message ClientHello {
   repeated Protocol supported_protocols = 3;
 }
 
+message ClientEvent {
+  oneof event {
+    ClientHello hello = 1;
+    LocalServiceRegistration register_local_service = 2;
+    LocalServiceUnregistration unregister_local_service = 3;
+  }
+}
+
 message Listener {
   Protocol protocol = 1;
   uint32 port = 2;
 }
 
 message ListenerSnapshot {
+  // These listeners are loopback-only outbound listeners used by the local
+  // Thin SDK. Ingress listeners are never exposed through bootstrap.
   repeated Listener listeners = 1;
+}
+
+message LocalServiceRegistration {
+  // Stable and unique within one OpenControlSession stream.
+  string registration_id = 1;
+  string namespace = 2;
+  string service = 3;
+  Protocol protocol = 4;
+  // The Sidecar always connects to this port through 127.0.0.1.
+  uint32 local_port = 5;
+}
+
+message LocalServiceUnregistration {
+  string registration_id = 1;
+}
+
+enum LocalServiceState {
+  LOCAL_SERVICE_STATE_UNSPECIFIED = 0;
+  LOCAL_SERVICE_STATE_REGISTERED = 1;
+  LOCAL_SERVICE_STATE_UNREGISTERED = 2;
+  LOCAL_SERVICE_STATE_REJECTED = 3;
+}
+
+message LocalServiceStatus {
+  string registration_id = 1;
+  LocalServiceState state = 2;
+  string message = 3;
 }
 
 message SidecarEvent {
   oneof event {
     ListenerSnapshot listener_snapshot = 1;
+    LocalServiceStatus local_service_status = 2;
   }
 }
