@@ -3,5 +3,5 @@ contract_version=2.0.0
 sidecar_session_wire_version=1
 target_service_wire_version=1
 specification_ref=develop
-specification_commit=776f590d1474c51847af75b44522953874097e55
+specification_commit=2642bc29c0a512f4da84ec4eb862b1e1ceee9833
 source_state=unreleased-develop

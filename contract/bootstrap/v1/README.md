@@ -13,12 +13,13 @@ Sidecar 主动下发的业务 listener 地址。业务请求不经过该 gRPC �
 
 ## 会话
 
-Thin SDK 调用 `pole.sidecar.v1.SidecarSessionService/OpenSession` 建立 server-streaming
-会话。该调用只用于建立连接和声明 SDK 信息，不携带端口查询条件。
+Thin SDK 调用 `pole.sidecar.v1.SidecarSessionService/OpenControlSession` 建立双向流。
+首个 client event 必须是 `ClientHello`；随后可发送本地服务 register/unregister
+事件。注册只属于当前流，流关闭时 Sidecar 必须移除它们。
 
-Sidecar 必须把完整 `ListenerSnapshot` 作为首个 server message 主动下发。每个
-会话只发送一次端口表；listener 在该 Sidecar 进程生命周期内保持不变。会话保持
-打开，可供未来兼容事件扩展，并用于及时检测 Sidecar 退出。
+Sidecar 必须把完整 `ListenerSnapshot` 作为首个 server message 主动下发。随后服务端
+只发送 `LocalServiceStatus`，用于报告注册成功、移除或拒绝。会话保持打开，用于及时
+检测 Sidecar 退出。
 
 Thin SDK 必须验证：
 
@@ -42,11 +43,12 @@ Sidecar 按以下顺序尝试绑定 loopback：
 | Thrift | 15004 |
 
 默认端口已占用时，Sidecar 回退到 `127.0.0.1:0`，由操作系统分配空闲端口。只有
-全部 listener 就绪后才能接受并完成 `OpenSession` bootstrap。
+全部 listener 就绪后才能接受并完成 `OpenControlSession` bootstrap。
 
 ## 失败与重连
 
 - 启动时 UDS 不可用或 bootstrap 超时：SDK 有界指数退避重连，超过期限后初始化失败。
 - 会话断开：SDK 立即使快照和旧连接池失效，新业务请求快速失败。
 - 重连成功：Sidecar 在新会话首帧重新下发完整快照，SDK 原子恢复。
+- SDK 在重连后重放其尚未 unregister 的本地服务注册；注册状态只反映当前会话。
 - SDK 不得绕过 Sidecar 直连真实服务。

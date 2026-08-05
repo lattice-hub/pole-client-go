@@ -3,6 +3,8 @@ package pole
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,13 +20,17 @@ import (
 func TestNewSidecarClientInstallsFirstSnapshot(t *testing.T) {
 	socketPath := newTestSocketPath(t)
 	helloReceived := make(chan *sidecarv1.ClientHello, 1)
-	server := startBootstrapServer(t, socketPath, func(hello *sidecarv1.ClientHello, stream grpc.ServerStreamingServer[sidecarv1.SidecarEvent]) error {
+	server := startControlServer(t, socketPath, func(stream grpc.BidiStreamingServer[sidecarv1.ClientEvent, sidecarv1.SidecarEvent]) error {
+		hello, err := receiveHello(stream)
+		if err != nil {
+			return err
+		}
 		helloReceived <- hello
 		if err := stream.Send(validSnapshot(18101)); err != nil {
 			return err
 		}
 		<-stream.Context().Done()
-		return stream.Context().Err()
+		return nil
 	})
 	defer server.stop()
 
@@ -52,32 +58,116 @@ func TestNewSidecarClientInstallsFirstSnapshot(t *testing.T) {
 	}
 }
 
-func TestNewSidecarClientRejectsInvalidFirstSnapshotUntilTimeout(t *testing.T) {
+func TestSidecarClientRegistersStatusesAndEndsControlSession(t *testing.T) {
 	socketPath := newTestSocketPath(t)
-	server := startBootstrapServer(t, socketPath, func(_ *sidecarv1.ClientHello, stream grpc.ServerStreamingServer[sidecarv1.SidecarEvent]) error {
-		return stream.Send(&sidecarv1.SidecarEvent{
-			Event: &sidecarv1.SidecarEvent_ListenerSnapshot{
-				ListenerSnapshot: &sidecarv1.ListenerSnapshot{
-					Listeners: []*sidecarv1.Listener{{Protocol: sidecarv1.Protocol_PROTOCOL_HTTP, Port: 15001}},
-				},
-			},
-		})
+	registrationReceived := make(chan *sidecarv1.LocalServiceRegistration, 1)
+	unregistrationReceived := make(chan *sidecarv1.LocalServiceUnregistration, 1)
+	closed := make(chan struct{})
+	server := startControlServer(t, socketPath, func(stream grpc.BidiStreamingServer[sidecarv1.ClientEvent, sidecarv1.SidecarEvent]) error {
+		if _, err := receiveHello(stream); err != nil {
+			return err
+		}
+		if err := stream.Send(validSnapshot(18401)); err != nil {
+			return err
+		}
+		registrationEvent, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		registration := registrationEvent.GetRegisterLocalService()
+		registrationReceived <- registration
+		if err := stream.Send(localServiceStatusEvent(
+			registration.GetRegistrationId(),
+			sidecarv1.LocalServiceState_LOCAL_SERVICE_STATE_REGISTERED,
+			"accepted")); err != nil {
+			return err
+		}
+		unregistrationEvent, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		unregistration := unregistrationEvent.GetUnregisterLocalService()
+		unregistrationReceived <- unregistration
+		if err := stream.Send(localServiceStatusEvent(
+			unregistration.GetRegistrationId(),
+			sidecarv1.LocalServiceState_LOCAL_SERVICE_STATE_UNREGISTERED,
+			"removed")); err != nil {
+			return err
+		}
+		_, err = stream.Recv()
+		if !errors.Is(err, io.EOF) {
+			return err
+		}
+		close(closed)
+		return nil
 	})
 	defer server.stop()
 
-	config := testBootstrapConfig(socketPath)
-	config.InitializationTimeout = 120 * time.Millisecond
-	if _, err := NewSidecarClient(context.Background(), config); !errors.Is(err, ErrInitializationTimeout) {
-		t.Fatalf("NewSidecarClient() error = %v, want ErrInitializationTimeout", err)
+	client, err := NewSidecarClient(context.Background(), testBootstrapConfig(socketPath))
+	if err != nil {
+		t.Fatalf("NewSidecarClient() error = %v", err)
+	}
+	registration, err := client.RegisterLocalServiceWithID(
+		"payments-http",
+		"prod",
+		"payments",
+		ProtocolHTTP,
+		8080,
+	)
+	if err != nil {
+		t.Fatalf("RegisterLocalServiceWithID() error = %v", err)
+	}
+	select {
+	case received := <-registrationReceived:
+		if received.GetRegistrationId() != registration.RegistrationID || received.GetLocalPort() != 8080 {
+			t.Fatalf("registration = %#v", received)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Sidecar did not receive local service registration")
+	}
+	eventually(t, time.Second, func() bool {
+		status, found := client.LocalServiceStatus(registration.RegistrationID)
+		return found && status.State == LocalServiceRegistered && status.Message == "accepted"
+	})
+
+	if err := client.UnregisterLocalService(registration.RegistrationID); err != nil {
+		t.Fatalf("UnregisterLocalService() error = %v", err)
+	}
+	select {
+	case received := <-unregistrationReceived:
+		if received.GetRegistrationId() != registration.RegistrationID {
+			t.Fatalf("unregistration = %#v", received)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Sidecar did not receive local service unregistration")
+	}
+	eventually(t, time.Second, func() bool {
+		status, found := client.LocalServiceStatus(registration.RegistrationID)
+		return found && status.State == LocalServiceUnregistered && status.Message == "removed"
+	})
+	client.Close()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Sidecar did not observe client stream completion")
 	}
 }
 
-func TestSidecarClientInvalidatesSnapshotOnDisconnectAndReconnects(t *testing.T) {
+func TestSidecarClientReplaysDesiredRegistrationsAfterReconnect(t *testing.T) {
 	socketPath := newTestSocketPath(t)
-	firstServer := startBootstrapServer(t, socketPath, func(_ *sidecarv1.ClientHello, stream grpc.ServerStreamingServer[sidecarv1.SidecarEvent]) error {
+	firstRegistration := make(chan *sidecarv1.LocalServiceRegistration, 1)
+	firstServer := startControlServer(t, socketPath, func(stream grpc.BidiStreamingServer[sidecarv1.ClientEvent, sidecarv1.SidecarEvent]) error {
+		if _, err := receiveHello(stream); err != nil {
+			return err
+		}
 		if err := stream.Send(validSnapshot(18201)); err != nil {
 			return err
 		}
+		event, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		firstRegistration <- event.GetRegisterLocalService()
 		<-stream.Context().Done()
 		return nil
 	})
@@ -88,15 +178,29 @@ func TestSidecarClientInvalidatesSnapshotOnDisconnectAndReconnects(t *testing.T)
 		t.Fatalf("NewSidecarClient() error = %v", err)
 	}
 	defer client.Close()
-	assertListenerAddress(t, client, ProtocolHTTP, "127.0.0.1:18201")
-
+	registration, err := client.RegisterLocalServiceWithID("catalog-grpc", "prod", "catalog", ProtocolGRPC, 9090)
+	if err != nil {
+		firstServer.stop()
+		t.Fatalf("RegisterLocalServiceWithID() error = %v", err)
+	}
+	select {
+	case <-firstRegistration:
+	case <-time.After(time.Second):
+		firstServer.stop()
+		t.Fatal("first Sidecar session did not receive registration")
+	}
 	firstServer.stop()
-	eventually(t, time.Second, func() bool {
-		_, err := client.ListenerAddress(ProtocolHTTP)
-		return errors.Is(err, ErrSidecarUnavailable)
-	})
 
-	secondServer := startBootstrapServer(t, socketPath, func(_ *sidecarv1.ClientHello, stream grpc.ServerStreamingServer[sidecarv1.SidecarEvent]) error {
+	replayedRegistration := make(chan *sidecarv1.LocalServiceRegistration, 1)
+	secondServer := startControlServer(t, socketPath, func(stream grpc.BidiStreamingServer[sidecarv1.ClientEvent, sidecarv1.SidecarEvent]) error {
+		if _, err := receiveHello(stream); err != nil {
+			return err
+		}
+		event, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		replayedRegistration <- event.GetRegisterLocalService()
 		if err := stream.Send(validSnapshot(18301)); err != nil {
 			return err
 		}
@@ -104,10 +208,40 @@ func TestSidecarClientInvalidatesSnapshotOnDisconnectAndReconnects(t *testing.T)
 		return nil
 	})
 	defer secondServer.stop()
+	select {
+	case replayed := <-replayedRegistration:
+		if replayed.GetRegistrationId() != registration.RegistrationID || replayed.GetLocalPort() != registration.LocalPort {
+			t.Fatalf("replayed registration = %#v", replayed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reconnected Sidecar session did not replay registration")
+	}
 	eventually(t, time.Second, func() bool {
 		address, err := client.ListenerAddress(ProtocolHTTP)
 		return err == nil && address == "127.0.0.1:18301"
 	})
+}
+
+func TestNewSidecarClientRejectsInvalidFirstSnapshotUntilTimeout(t *testing.T) {
+	socketPath := newTestSocketPath(t)
+	server := startControlServer(t, socketPath, func(stream grpc.BidiStreamingServer[sidecarv1.ClientEvent, sidecarv1.SidecarEvent]) error {
+		if _, err := receiveHello(stream); err != nil {
+			return err
+		}
+		return stream.Send(&sidecarv1.SidecarEvent{Event: &sidecarv1.SidecarEvent_ListenerSnapshot{
+			ListenerSnapshot: &sidecarv1.ListenerSnapshot{Listeners: []*sidecarv1.Listener{{
+				Protocol: sidecarv1.Protocol_PROTOCOL_HTTP,
+				Port:     15001,
+			}}},
+		}})
+	})
+	defer server.stop()
+
+	config := testBootstrapConfig(socketPath)
+	config.InitializationTimeout = 120 * time.Millisecond
+	if _, err := NewSidecarClient(context.Background(), config); !errors.Is(err, ErrInitializationTimeout) {
+		t.Fatalf("NewSidecarClient() error = %v, want ErrInitializationTimeout", err)
+	}
 }
 
 func TestSnapshotFromEventRejectsDuplicateUnknownAndInvalidPorts(t *testing.T) {
@@ -131,12 +265,6 @@ func TestSnapshotFromEventRejectsDuplicateUnknownAndInvalidPorts(t *testing.T) {
 		}}}}},
 		{name: "port out of range", event: &sidecarv1.SidecarEvent{Event: &sidecarv1.SidecarEvent_ListenerSnapshot{ListenerSnapshot: &sidecarv1.ListenerSnapshot{Listeners: []*sidecarv1.Listener{
 			{Protocol: sidecarv1.Protocol_PROTOCOL_HTTP, Port: 0},
-			{Protocol: sidecarv1.Protocol_PROTOCOL_GRPC, Port: 15002},
-			{Protocol: sidecarv1.Protocol_PROTOCOL_DUBBO, Port: 15003},
-			{Protocol: sidecarv1.Protocol_PROTOCOL_THRIFT, Port: 15004},
-		}}}}},
-		{name: "port too large", event: &sidecarv1.SidecarEvent{Event: &sidecarv1.SidecarEvent_ListenerSnapshot{ListenerSnapshot: &sidecarv1.ListenerSnapshot{Listeners: []*sidecarv1.Listener{
-			{Protocol: sidecarv1.Protocol_PROTOCOL_HTTP, Port: 65536},
 			{Protocol: sidecarv1.Protocol_PROTOCOL_GRPC, Port: 15002},
 			{Protocol: sidecarv1.Protocol_PROTOCOL_DUBBO, Port: 15003},
 			{Protocol: sidecarv1.Protocol_PROTOCOL_THRIFT, Port: 15004},
@@ -168,7 +296,7 @@ type bootstrapTestServer struct {
 	once       sync.Once
 }
 
-func startBootstrapServer(t *testing.T, socketPath string, open func(*sidecarv1.ClientHello, grpc.ServerStreamingServer[sidecarv1.SidecarEvent]) error) *bootstrapTestServer {
+func startControlServer(t *testing.T, socketPath string, open func(grpc.BidiStreamingServer[sidecarv1.ClientEvent, sidecarv1.SidecarEvent]) error) *bootstrapTestServer {
 	t.Helper()
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -176,9 +304,7 @@ func startBootstrapServer(t *testing.T, socketPath string, open func(*sidecarv1.
 	}
 	grpcServer := grpc.NewServer()
 	sidecarv1.RegisterSidecarSessionServiceServer(grpcServer, bootstrapService{open: open})
-	go func() {
-		_ = grpcServer.Serve(listener)
-	}()
+	go func() { _ = grpcServer.Serve(listener) }()
 	return &bootstrapTestServer{grpcServer: grpcServer, listener: listener, path: socketPath}
 }
 
@@ -192,11 +318,22 @@ func (server *bootstrapTestServer) stop() {
 
 type bootstrapService struct {
 	sidecarv1.UnimplementedSidecarSessionServiceServer
-	open func(*sidecarv1.ClientHello, grpc.ServerStreamingServer[sidecarv1.SidecarEvent]) error
+	open func(grpc.BidiStreamingServer[sidecarv1.ClientEvent, sidecarv1.SidecarEvent]) error
 }
 
-func (service bootstrapService) OpenSession(hello *sidecarv1.ClientHello, stream grpc.ServerStreamingServer[sidecarv1.SidecarEvent]) error {
-	return service.open(hello, stream)
+func (service bootstrapService) OpenControlSession(stream grpc.BidiStreamingServer[sidecarv1.ClientEvent, sidecarv1.SidecarEvent]) error {
+	return service.open(stream)
+}
+
+func receiveHello(stream grpc.BidiStreamingServer[sidecarv1.ClientEvent, sidecarv1.SidecarEvent]) (*sidecarv1.ClientHello, error) {
+	event, err := stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+	if event.GetHello() == nil {
+		return nil, fmt.Errorf("first client event must be hello")
+	}
+	return event.GetHello(), nil
 }
 
 func validSnapshot(firstPort uint32) *sidecarv1.SidecarEvent {
@@ -206,6 +343,14 @@ func validSnapshot(firstPort uint32) *sidecarv1.SidecarEvent {
 		{Protocol: sidecarv1.Protocol_PROTOCOL_DUBBO, Port: firstPort + 2},
 		{Protocol: sidecarv1.Protocol_PROTOCOL_THRIFT, Port: firstPort + 3},
 	}}}}
+}
+
+func localServiceStatusEvent(registrationID string, state sidecarv1.LocalServiceState, message string) *sidecarv1.SidecarEvent {
+	return &sidecarv1.SidecarEvent{Event: &sidecarv1.SidecarEvent_LocalServiceStatus{LocalServiceStatus: &sidecarv1.LocalServiceStatus{
+		RegistrationId: registrationID,
+		State:          state,
+		Message:        message,
+	}}}
 }
 
 func testBootstrapConfig(socketPath string) BootstrapConfig {

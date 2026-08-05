@@ -78,3 +78,17 @@
 - CI 矩阵覆盖 Go 1.22/1.23；模块保持标准库 only，未发布版本标签。
 - 最终审查修复 checksum/VERSION 假阳性；手动 release-check 与 CI 同步执行
   `gofmt`、race test 和 `go vet`。
+
+## 2026-08-06 OpenControlSession 迁移
+
+- [x] 核对 `OpenControlSession` 权威契约与旧会话边界
+- [x] 更新 vendored proto 与 Go 生成代码
+- [x] 实现注册 API、状态处理与重连重放
+- [x] 更新 README 和单元/UDS 集成测试
+- [x] 运行 Go 验证并提交本地变更
+
+### Review
+
+- 契约引用 specification `develop` 集成提交 `2642bc29c0a512f4da84ec4eb862b1e1ceee9833`。
+- `go test -count=1 ./...`、`go test -race -count=1 ./...`、`go vet ./...` 与
+  vendored checksum 均通过。
