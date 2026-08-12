@@ -1,6 +1,6 @@
 module github.com/lattice-hub/pole-client-go
 
-go 1.22
+go 1.25.0
 
 require (
 	go.opentelemetry.io/otel v1.31.0
@@ -9,8 +9,8 @@ require (
 )
 
 require (
-	golang.org/x/net v0.30.0 // indirect
-	golang.org/x/sys v0.26.0 // indirect
-	golang.org/x/text v0.19.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241015192408-796eee8c2d53 // indirect
 )
