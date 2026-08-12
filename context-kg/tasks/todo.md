@@ -1,5 +1,64 @@
 # Go Thin SDK
 
+## 2026-08-12 TrafficContext delivery audit
+
+- [x] 重新核对权威契约、来源记录与当前未提交差异
+- [x] 审查传播实现、公开 API 与出站 carrier 集成，修复明确问题
+- [x] 执行格式化、单元、竞态、vet、契约校验与 diff 空白检查
+- [x] 复核变更范围、风险与可提交边界
+
+### Review
+
+- 以已合入 Specification `develop` 的不可变提交
+  `67b101bb6e3906b4337affefd33ef778cec692b3` 更新 `contract/VERSION`；当前 SDK
+  仍未发布，故保留 `source_state=unreleased-develop`。
+- 复核 `TrafficContext` 的 native `context.Context` 与 OTel Baggage bridge、canonical
+  编解码和 conformance diagnostic；HTTP、gRPC、Dubbo 三个 TargetService 公共出站
+  装配点均走同一个 `InjectTrafficContext` 路径。
+- 修正 HTTP Header / gRPC Metadata 的 Baggage 键大小写边界：现在会收集并删除所有
+  大小写变体，再只写一个规范 `baggage` carrier，避免旧保留成员绕过清理。
+- `gofmt`、`go mod tidy`、普通/竞态测试、`go vet`、内外层契约 checksum 和
+  `git diff --check` 全部通过；仓库无可用的 context-kg lint 脚本。
+- 可提交范围仅包含 TrafficContext 运行时、契约资产、OTel 依赖、TargetService 三类
+  carrier 集成、README 和本任务记录；未暂存、未提交、未切分支、未推送。
+
+## 2026-08-06 TrafficContext v1
+
+- [x] 核对 TargetService 编码入口与契约资产
+- [x] 先写 TrafficContext 传播与作用域测试
+- [x] 实现 `context.Context` 原生存储和 baggage 编解码
+- [x] 接入 TargetService metadata 公共编码路径
+- [x] 复制 v1 契约、更新 README 并完成全量验证
+- [x] 复审 W3C OWS、外部空值与输入限制兼容性
+- [x] 二轮复审：空上下文、大小写与 raw OWS 语义
+- [x] 同步新版 conformance 空上下文清理向量与校验和
+- [x] 注入清理全部精确小写保留前缀，extract 保持未知字段拒绝
+- [x] 接入标准 OTel Baggage 存储与 private-value 缺失回退
+- [x] 修正 OTel Raw 值编码并覆盖空格、中文和字面 `%HH`
+- [x] 执行全部 TrafficContext conformance 向量并校验 diagnostic
+
+### Review
+
+- `TrafficContext` 使用可选 campaign/lane/bucket，Go 以派生 `context.Context` 形成
+  scope；显式上下文优先于 current，父 context 或 `ResetTrafficContext` 恢复/清空状态。
+- Baggage 保留外部成员、覆盖旧保留成员，严格校验 version、重复、未知键、property、
+  canonical UTF-8 `%HH` 与成员/字节上限；无成员时返回 nil 供调用方删除 carrier。
+- Baggage parser 按 W3C 支持 SP/HTAB OWS、外部空值、合法 property，并拒绝非法 token/
+  baggage-octet；多 Header 按逗号合并后在输入阶段限制 8192 bytes。
+- 二轮复审后，空 TrafficContext 与 version-only carrier 合法；注入仅清理旧保留成员，
+  保留前缀判断大小写敏感，foreign raw 仅去除 member 的外层 OWS。
+- TargetService 与 TrafficContext 分别在 HTTP、gRPC 和 Dubbo 的同一出站编码点写入，
+  前者内部键仍覆盖，Baggage 保持下游可见。
+- 已执行 `gofmt`、contract checksum、`go test -count=1 ./...`、
+  `go test -race -count=1 ./...`、`go vet ./...` 和 `git diff --check`。
+- 三轮复审后，`AttachTrafficContext` 会保留外部 OTel Baggage 并删除全部精确小写
+  `latticehub.traffic.*` 成员后写入当前标签；私有 `context.Value` 缺失时，`CurrentTrafficContext`
+  从合法 OTel Baggage 恢复，`ResetTrafficContext` 也会清除 OTel 流量成员。注入路径清理未知
+  保留成员，但 extract 仍拒绝它们。
+- 四轮复审后，OTel 成员统一使用 `baggage.NewMemberRaw` 接收领域原值，避免空格、Unicode
+  和字面 `%HH` 被误解为预编码内容；conformance 测试完整执行 valid、sidecar receive valid/
+  invalid，并通过 `TrafficContextError.Diagnostic` 精确比对规范诊断码。
+
 ## 2026-08-02 Sidecar bootstrap 改造计划
 
 - [x] 核对现有 SDK、权威契约与生成工具

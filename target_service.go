@@ -1,6 +1,7 @@
 package pole
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -129,6 +130,23 @@ func (target *TargetService) EncodeHTTPHeaders(base http.Header) (http.Header, e
 	return encoded, nil
 }
 
+// EncodeHTTPHeadersWithTrafficContext assembles TargetService and W3C Baggage at one HTTP egress point.
+// An explicit TrafficContext wins over the value attached to requestContext.
+func (target *TargetService) EncodeHTTPHeadersWithTrafficContext(requestContext context.Context, base http.Header, explicit *TrafficContext) (http.Header, error) {
+	encoded, err := target.EncodeHTTPHeaders(base)
+	if err != nil {
+		return nil, err
+	}
+	baggage, err := InjectTrafficContext(requestContext, takeBaggageHTTPHeaders(encoded), explicit)
+	if err != nil {
+		return nil, err
+	}
+	if baggage != nil {
+		encoded.Set(HeaderBaggage, *baggage)
+	}
+	return encoded, nil
+}
+
 // EncodeGRPCMetadata returns a copy of base with TargetService gRPC metadata replaced.
 func (target *TargetService) EncodeGRPCMetadata(base metadata.MD) (metadata.MD, error) {
 	metadataPairs, err := target.Metadata()
@@ -142,6 +160,23 @@ func (target *TargetService) EncodeGRPCMetadata(base metadata.MD) (metadata.MD, 
 	removeTargetServiceGRPCMetadata(encoded)
 	for _, pair := range metadataPairs {
 		encoded.Set(pair.Name, pair.Value)
+	}
+	return encoded, nil
+}
+
+// EncodeGRPCMetadataWithTrafficContext assembles TargetService and W3C Baggage at one gRPC egress point.
+// The returned Baggage metadata remains available to the downstream provider.
+func (target *TargetService) EncodeGRPCMetadataWithTrafficContext(requestContext context.Context, base metadata.MD, explicit *TrafficContext) (metadata.MD, error) {
+	encoded, err := target.EncodeGRPCMetadata(base)
+	if err != nil {
+		return nil, err
+	}
+	baggage, err := InjectTrafficContext(requestContext, takeBaggageGRPCMetadata(encoded), explicit)
+	if err != nil {
+		return nil, err
+	}
+	if baggage != nil {
+		encoded.Set(HeaderBaggage, *baggage)
 	}
 	return encoded, nil
 }
@@ -163,6 +198,51 @@ func (target *TargetService) EncodeAttachments(base map[string]string) (map[stri
 		encoded[pair.Name] = pair.Value
 	}
 	return encoded, nil
+}
+
+// EncodeAttachmentsWithTrafficContext assembles TargetService and W3C Baggage at one Dubbo egress point.
+func (target *TargetService) EncodeAttachmentsWithTrafficContext(requestContext context.Context, base map[string]string, explicit *TrafficContext) (map[string]string, error) {
+	encoded, err := target.EncodeAttachments(base)
+	if err != nil {
+		return nil, err
+	}
+	existing := make([]string, 0, 1)
+	for name, value := range encoded {
+		if strings.EqualFold(name, HeaderBaggage) {
+			existing = append(existing, value)
+			delete(encoded, name)
+		}
+	}
+	baggage, err := InjectTrafficContext(requestContext, existing, explicit)
+	if err != nil {
+		return nil, err
+	}
+	if baggage != nil {
+		encoded[HeaderBaggage] = *baggage
+	}
+	return encoded, nil
+}
+
+func takeBaggageHTTPHeaders(headers http.Header) []string {
+	values := make([]string, 0, 1)
+	for name, headerValues := range headers {
+		if strings.EqualFold(name, HeaderBaggage) {
+			values = append(values, headerValues...)
+			delete(headers, name)
+		}
+	}
+	return values
+}
+
+func takeBaggageGRPCMetadata(values metadata.MD) []string {
+	baggageValues := make([]string, 0, 1)
+	for name, memberValues := range values {
+		if strings.EqualFold(name, HeaderBaggage) {
+			baggageValues = append(baggageValues, memberValues...)
+			delete(values, name)
+		}
+	}
+	return baggageValues
 }
 
 func removeTargetServiceHTTPHeaders(headers http.Header) {

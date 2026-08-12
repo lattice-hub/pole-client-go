@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://latticehub.io/specification/thin-sdk/traffic-context/v1/schema.json",
+  "title": "LatticeHub TrafficContext Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "labels"],
+  "properties": {
+    "version": {"const": 1},
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "campaign": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-latticehub-maxUtf8Bytes": 128
+        },
+        "lane": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-latticehub-maxUtf8Bytes": 128
+        },
+        "bucket": {"type": "integer", "minimum": 0, "maximum": 9999}
+      }
+    }
+  }
+}

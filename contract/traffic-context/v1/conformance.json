@@ -1,0 +1,93 @@
+{
+  "contract": "latticehub-traffic-context",
+  "contract_version": "1.0.0",
+  "wire_version": 1,
+  "valid": [
+    {
+      "name": "gray_lane",
+      "input": {
+        "version": 1,
+        "labels": {"campaign": "checkout-v2", "lane": "gray", "bucket": 42}
+      },
+      "existing_baggage": ["vendor=value;property=one"],
+      "expected_baggage": "vendor=value;property=one,latticehub.traffic.version=1,latticehub.traffic.campaign=checkout-v2,latticehub.traffic.lane=gray,latticehub.traffic.bucket=42"
+    },
+    {
+      "name": "unicode_and_reserved_bytes",
+      "input": {
+        "version": 1,
+        "labels": {"campaign": "checkout v2", "lane": "灰度", "bucket": 7}
+      },
+      "existing_baggage": [],
+      "expected_baggage": "latticehub.traffic.version=1,latticehub.traffic.campaign=checkout%20v2,latticehub.traffic.lane=%E7%81%B0%E5%BA%A6,latticehub.traffic.bucket=7"
+    },
+    {
+      "name": "lane_only",
+      "input": {
+        "version": 1,
+        "labels": {"lane": "gray"}
+      },
+      "existing_baggage": [],
+      "expected_baggage": "latticehub.traffic.version=1,latticehub.traffic.lane=gray"
+    },
+    {
+      "name": "empty_context_cleans_reserved_prefix",
+      "input": {
+        "version": 1,
+        "labels": {}
+      },
+      "existing_baggage": [
+        "vendor=value",
+        "latticehub.traffic.version=1,latticehub.traffic.future=stale"
+      ],
+      "expected_baggage": "vendor=value"
+    }
+  ],
+  "sidecar_receive": {
+    "valid": [
+      {
+        "name": "split_headers_with_foreign_member",
+        "baggage": [
+          "vendor=value,latticehub.traffic.version=1",
+          "latticehub.traffic.campaign=checkout-v2,latticehub.traffic.lane=gray,latticehub.traffic.bucket=42"
+        ],
+        "expected": {
+          "version": 1,
+          "labels": {"campaign": "checkout-v2", "lane": "gray", "bucket": 42}
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "missing_version",
+        "baggage": ["latticehub.traffic.lane=gray"],
+        "diagnostic": "MISSING_VERSION"
+      },
+      {
+        "name": "duplicate_lane",
+        "baggage": ["latticehub.traffic.version=1,latticehub.traffic.lane=gray,latticehub.traffic.lane=other"],
+        "diagnostic": "DUPLICATE_LANE"
+      },
+      {
+        "name": "unsupported_version",
+        "baggage": ["latticehub.traffic.version=2,latticehub.traffic.lane=gray"],
+        "diagnostic": "UNSUPPORTED_VERSION"
+      },
+      {
+        "name": "bucket_out_of_range",
+        "baggage": ["latticehub.traffic.version=1,latticehub.traffic.bucket=10000"],
+        "diagnostic": "INVALID_BUCKET"
+      },
+      {
+        "name": "non_canonical_label",
+        "baggage": ["latticehub.traffic.version=1,latticehub.traffic.lane=%67ray"],
+        "diagnostic": "NON_CANONICAL_VALUE"
+      },
+      {
+        "name": "label_exceeds_utf8_byte_limit",
+        "baggage": ["latticehub.traffic.version=1,latticehub.traffic.lane=%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0%E7%81%B0"],
+        "diagnostic": "LABEL_TOO_LARGE"
+      }
+    ]
+  }
+}

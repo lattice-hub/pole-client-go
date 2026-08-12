@@ -103,9 +103,43 @@ latticehub-target-service
 Sidecar 必须在转发前再次校验这两个字段并删除它们。v1 的信任边界是 Kubernetes
 Pod；不增加 session token 或逐请求签名。
 
+## TrafficContext v1
+
+`TrafficContext` 统一携带可选的 `campaign`、`lane` 与 `bucket`（`0..9999`）流量标签；
+它不使用 `trace-id` 关联灰度。`NewTrafficContext` 校验标签后创建值，
+`AttachTrafficContext` 返回派生的 `context.Context`，调用方保留父 context 即可在 scope
+结束后恢复；`ResetTrafficContext` 创建不含标签并清理 OTel 流量成员的派生 context。
+Go 的 `context.Context` 可直接与 OTel context 链共存：`AttachTrafficContext` 同时更新标准 OTel Baggage，
+`CurrentTrafficContext` 在私有值不存在时从合法的 OTel Baggage 恢复标签，因此标准 W3C
+Baggage Propagator 可直接完成跨进程传播。OTel Baggage 成员通过 `NewMemberRaw` 接收领域原值，
+空格、Unicode 和字面 `%HH` 只会在 wire 序列化时编码一次。
+
+`ExtractTrafficContext` 只解码 `baggage`，不会改变当前 context；
+`InjectTrafficContext` 的显式参数优先，否则读取传入 context 的当前值。使用
+`EncodeHTTPHeadersWithTrafficContext`、`EncodeGRPCMetadataWithTrafficContext` 或
+`EncodeAttachmentsWithTrafficContext` 时，TargetService 与 TrafficContext 在同一个出站
+装配点写入。前者会被本地 Sidecar 删除，W3C Baggage 会继续转发到真实服务。
+
+```go
+lane := "gray"
+traffic, err := pole.NewTrafficContext(pole.TrafficContextInput{Lane: &lane})
+if err != nil {
+	return err
+}
+requestContext, err := pole.AttachTrafficContext(ctx, traffic)
+if err != nil {
+	return err
+}
+request.Header, err = target.EncodeHTTPHeadersWithTrafficContext(requestContext, request.Header, nil)
+```
+
+自动框架 hook、自动 OTel propagator 安装不在本次核心 SDK 范围内；框架 adapter 应在入口
+extract 后按请求生命周期 attach，并在出站调用时使用上述统一编码 API。完整 wire 契约位于
+`contract/traffic-context/v1/`。
+
 ## 契约资产
 
-`contract/` vendor 了 `TargetService v1`、Sidecar session 文档以及官方
+`contract/` vendor 了 `TargetService v1`、`TrafficContext v1`、Sidecar session 文档以及官方
 `api/v1/sidecar/bootstrap.proto`。`internal/bootstrapv1/` 中的 Go 文件由
 `protoc-gen-go` 和 `protoc-gen-go-grpc` 生成，不应手改。资产校验和位于
 `contract/SHA256SUMS`。
